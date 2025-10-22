@@ -2,15 +2,14 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, BooleanObject
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
 
 # --- FUNCION PARA CREAR CAPA DE TEXTO CON REPORTLAB ---
 def create_overlay(data_dict, page_size):
     packet = BytesIO()
     can = canvas.Canvas(packet, pagesize=page_size)
-    # Ajusta la posición según tus campos en el PDF
-    y_start = page_size[1] - 50  # ejemplo, 50 pts desde arriba
+    y_start = page_size[1] - 50  # Ajusta según tus campos
     for i, (field, value) in enumerate(data_dict.items()):
         can.drawString(50, y_start - i*20, f"{field}: {value}")
     can.save()
@@ -26,13 +25,13 @@ def fill_pdf_visible(input_pdf, data_dict):
     for page in reader.pages:
         writer.add_page(page)
 
-    # Forzar NeedAppearances
+    # Forzar NeedAppearances en AcroForm
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
-            "/AcroForm": reader.trailer["/Root"]["/AcroForm"]
+            NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
         })
     else:
-        from pypdf.generic import DictionaryObject, ArrayObject, BooleanObject, NameObject
+        from pypdf.generic import DictionaryObject, ArrayObject
         writer._root_object.update({
             NameObject("/AcroForm"): DictionaryObject({
                 NameObject("/Fields"): ArrayObject(),
@@ -44,13 +43,10 @@ def fill_pdf_visible(input_pdf, data_dict):
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
 
-    # Generar capa con reportlab
+    # Crear capa de texto con reportlab
     first_page = reader.pages[0]
     page_size = (first_page.mediabox.width, first_page.mediabox.height)
     overlay_pdf = PdfReader(create_overlay(data_dict, page_size))
-
-    # Fusionar la capa de texto sobre la primera página
-    from pypdf import PageObject
     overlay_page = overlay_pdf.pages[0]
     first_page.merge_page(overlay_page)
 
@@ -63,7 +59,6 @@ def fill_pdf_visible(input_pdf, data_dict):
 # --- STREAMLIT ---
 st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
 st.title("🧾 Generador de PDF Climagas")
-
 st.markdown("Sube tu PDF plantilla y Excel con productos para generar un PDF con los campos visibles automáticamente.")
 
 pdf_file = st.file_uploader("📄 Sube la plantilla PDF", type="pdf")
@@ -89,10 +84,7 @@ if st.button("🚀 Generar PDF"):
                 st.error("El código del producto no se encuentra en el Excel.")
             else:
                 row = df.loc[df['PRODUCTO'] == producto].iloc[0]
-                data_dict = {}
-                for pdf_field, excel_col in pdf_to_excel_map.items():
-                    if excel_col in row:
-                        data_dict[pdf_field] = str(row[excel_col])
+                data_dict = {pdf_field: str(row[excel_col]) for pdf_field, excel_col in pdf_to_excel_map.items() if excel_col in row}
 
                 output_pdf = fill_pdf_visible(pdf_file, data_dict)
 
