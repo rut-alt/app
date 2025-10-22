@@ -1,15 +1,22 @@
-import tkinter as tk
-from tkinter import messagebox
+import streamlit as st
 import pandas as pd
+from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject, BooleanObject
 
-# Archivos
-input_pdf = "IT315 PLANTILLA CLIMAGAS ACT.pdf"
-output_pdf = "pdf_campos_rellenados.pdf"
-excel_file = "datos_productos.xlsx"
+st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
+st.title("🧾 Generador de PDF Climagas")
 
-# Mapeo PDF -> Excel
+st.markdown("Sube tu plantilla PDF y el archivo Excel con los datos del producto.")
+
+# Subida de archivos
+pdf_file = st.file_uploader("📄 Sube la plantilla PDF", type="pdf")
+excel_file = st.file_uploader("📊 Sube el Excel con los productos", type=["xls", "xlsx"])
+
+# Entrada de producto
+producto = st.number_input("Introduce el código del producto", step=1, min_value=0)
+
+# Mapeo de campos
 pdf_to_excel_map = {
     "Potencia Nominal kW": "Potencia Nominal kW",
     "Fecha de solicitud de licencia de obra en su defec": "Fecha de solicitud de licencia de obra en su defect",
@@ -19,58 +26,59 @@ pdf_to_excel_map = {
     "Administrativo": "Administrativo"
 }
 
-def generar_pdf():
-    try:
-        # Leer producto
-        producto = int(entry_producto.get())
-        df = pd.read_excel(excel_file)
+# Botón principal
+if st.button("🚀 Generar PDF"):
+    if not pdf_file or not excel_file:
+        st.error("Por favor, sube el PDF y el Excel antes de continuar.")
+    else:
+        try:
+            # Leer Excel
+            df = pd.read_excel(excel_file)
+            if producto not in df['PRODUCTO'].values:
+                st.error("El código del producto no se encuentra en el Excel.")
+            else:
+                reader = PdfReader(pdf_file)
+                writer = PdfWriter()
 
-        reader = PdfReader(input_pdf)
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
+                for page in reader.pages:
+                    writer.add_page(page)
 
-        for page in writer.pages:
-            annots = page.get("/Annots")
-            if not annots:
-                continue
-            for annot in annots:
-                field = annot.get_object()
-                field_name = field.get("/T")
-                if not field_name or field_name not in pdf_to_excel_map:
-                    continue
+                for page in writer.pages:
+                    annots = page.get("/Annots")
+                    if not annots:
+                        continue
+                    for annot in annots:
+                        field = annot.get_object()
+                        field_name = field.get("/T")
+                        if not field_name or field_name not in pdf_to_excel_map:
+                            continue
 
-                excel_col = pdf_to_excel_map[field_name]
-                value = df.loc[df['PRODUCTO'] == producto, excel_col].values[0]
+                        excel_col = pdf_to_excel_map[field_name]
+                        value = df.loc[df['PRODUCTO'] == producto, excel_col].values[0]
 
-                if field.get("/FT") == "/Btn":  # Checkbox
-                    field.update({
-                        NameObject("/V"): NameObject("/Yes") if value else NameObject("/Off"),
-                        NameObject("/AS"): NameObject("/Yes") if value else NameObject("/Off")
-                    })
-                else:  # Texto
-                    field.update({NameObject("/V"): TextStringObject(str(value))})
-                    # Forzar actualización de apariencia
-                    field.update({NameObject("/Ff"): BooleanObject(True)})
+                        if field.get("/FT") == "/Btn":  # Checkbox
+                            field.update({
+                                NameObject("/V"): NameObject("/Yes") if value else NameObject("/Off"),
+                                NameObject("/AS"): NameObject("/Yes") if value else NameObject("/Off")
+                            })
+                        else:  # Texto
+                            field.update({NameObject("/V"): TextStringObject(str(value))})
+                            field.update({NameObject("/Ff"): BooleanObject(True)})
 
-        # Guardar PDF
-        with open(output_pdf, "wb") as f:
-            writer.write(f)
+                # Guardar PDF en memoria
+                output_pdf = BytesIO()
+                writer.write(output_pdf)
+                output_pdf.seek(0)
 
-        messagebox.showinfo("¡Listo!", f"PDF generado para el producto {producto}")
+                st.success(f"✅ PDF generado correctamente para el producto {producto}")
 
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+                # Descargar el PDF
+                st.download_button(
+                    label="⬇️ Descargar PDF generado",
+                    data=output_pdf,
+                    file_name=f"pdf_producto_{producto}.pdf",
+                    mime="application/pdf"
+                )
 
-# GUI
-root = tk.Tk()
-root.title("Generador de PDF Climagas")
-root.geometry("350x150")
-
-tk.Label(root, text="Introduce el código del producto:").pack(padx=10, pady=10)
-entry_producto = tk.Entry(root)
-entry_producto.pack(padx=10, pady=5)
-
-tk.Button(root, text="Generar PDF", command=generar_pdf).pack(pady=20)
-
-root.mainloop()
+        except Exception as e:
+            st.error(f"Ocurrió un error: {e}")
