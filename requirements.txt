@@ -2,4 +2,6 @@ streamlit
 pandas
 openpyxl
 pypdf
+reportlab
 protobuf<4,>=3.20.3
+
