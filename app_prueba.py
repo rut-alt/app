@@ -4,6 +4,36 @@ from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject, BooleanObject
 
+# --- FUNCIÓN PARA RELLENAR PDF Y HACER QUE LOS DATOS SE VEAN ---
+def fill_pdf(input_pdf, data_dict):
+    reader = PdfReader(input_pdf)
+    writer = PdfWriter()
+
+    for page in reader.pages:
+        writer.add_page(page)
+
+    writer.update_page_form_field_values(writer.pages[0], data_dict)
+
+    # 🔹 Fuerza que los valores se vean al abrir el PDF
+    if "/AcroForm" in reader.trailer["/Root"]:
+        writer._root_object.update({
+            NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
+        })
+        writer._root_object["/AcroForm"].update({
+            NameObject("/NeedAppearances"): BooleanObject(True)
+        })
+    else:
+        writer._root_object.update({
+            NameObject("/NeedAppearances"): BooleanObject(True)
+        })
+
+    output = BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+
+# --- INTERFAZ STREAMLIT ---
 st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
 st.title("🧾 Generador de PDF Climagas")
 
@@ -37,49 +67,15 @@ if st.button("🚀 Generar PDF"):
             if producto not in df['PRODUCTO'].values:
                 st.error("El código del producto no se encuentra en el Excel.")
             else:
-                reader = PdfReader(pdf_file)
-                writer = PdfWriter()
+                # --- Crear diccionario de datos a rellenar ---
+                row = df.loc[df['PRODUCTO'] == producto].iloc[0]
+                data_dict = {}
+                for pdf_field, excel_col in pdf_to_excel_map.items():
+                    if excel_col in row:
+                        data_dict[pdf_field] = str(row[excel_col])
 
-                for page in reader.pages:
-                    writer.add_page(page)
-
-                for page in writer.pages:
-                    annots = page.get("/Annots")
-                    if not annots:
-                        continue
-                    for annot in annots:
-                        field = annot.get_object()
-                        field_name = field.get("/T")
-                        if not field_name or field_name not in pdf_to_excel_map:
-                            continue
-
-                        excel_col = pdf_to_excel_map[field_name]
-                        value = df.loc[df['PRODUCTO'] == producto, excel_col].values[0]
-
-                        # Checkbox
-                        if field.get("/FT") == "/Btn":
-                            field.update({
-                                NameObject("/V"): NameObject("/Yes") if value else NameObject("/Off"),
-                                NameObject("/AS"): NameObject("/Yes") if value else NameObject("/Off")
-                            })
-                        else:
-                            field.update({
-                                NameObject("/V"): TextStringObject(str(value)),
-                                NameObject("/Ff"): BooleanObject(True),
-                                NameObject("/DA"): TextStringObject("/Helv 0 Tf 0 g")
-                            })
-
-                # Configuración visual de formulario
-                if "/AcroForm" in writer._root_object:
-                    writer._root_object["/AcroForm"].update({
-                        NameObject("/NeedAppearances"): BooleanObject(False),
-                        NameObject("/SigFlags"): 3
-                    })
-
-                # Guardar PDF en memoria
-                output_pdf = BytesIO()
-                writer.write(output_pdf)
-                output_pdf.seek(0)
+                # --- Generar PDF relleno ---
+                output_pdf = fill_pdf(pdf_file, data_dict)
 
                 st.success(f"✅ PDF generado correctamente para el producto {producto}")
 
@@ -91,4 +87,6 @@ if st.button("🚀 Generar PDF"):
                 )
 
         except Exception as e:
-            st.error(f"❌ Ocurrió un error: {e}")
+            st.error(f"❌ Error al generar el PDF: {e}")
+
+
