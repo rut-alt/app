@@ -1,41 +1,28 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, TextStringObject, BooleanObject, DictionaryObject, ArrayObject
+from pdfrw import PdfReader, PdfWriter, PdfName, PdfString
 
-
-def fill_pdf(input_pdf, data_dict):
-    reader = PdfReader(input_pdf)
-    writer = PdfWriter()
-
-    # Añadir todas las páginas
-    for page in reader.pages:
-        writer.add_page(page)
-
-    # ✅ Copiar o crear AcroForm antes de rellenar campos
-    if "/AcroForm" in reader.trailer["/Root"]:
-        writer._root_object.update({
-            NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
-        })
-    else:
-        writer._root_object.update({
-            NameObject("/AcroForm"): DictionaryObject({
-                NameObject("/Fields"): ArrayObject(),
-                NameObject("/NeedAppearances"): BooleanObject(True)
-            })
-        })
-
-    # ✅ Ahora sí, rellenar los campos
-    writer.update_page_form_field_values(writer.pages[0], data_dict)
-
-    # Forzar visualización de valores
-    writer._root_object["/AcroForm"].update({
-        NameObject("/NeedAppearances"): BooleanObject(True)
-    })
+# --- FUNCION PARA RELLENAR PDF CON CAMPOS VISIBLES ---
+def fill_pdf_pdfrw(input_pdf, data_dict):
+    template_pdf = PdfReader(input_pdf)
+    
+    for page in template_pdf.pages:
+        annotations = page.get("/Annots")
+        if annotations:
+            for annotation in annotations:
+                field_name = annotation.get("/T")
+                if field_name:
+                    # Quitar paréntesis del nombre del campo
+                    key = field_name[1:-1] if field_name.startswith("(") and field_name.endswith(")") else field_name
+                    if key in data_dict:
+                        annotation.update({
+                            PdfName("V"): PdfString(str(data_dict[key])),
+                            PdfName("Ff"): 1  # forzar visualización
+                        })
 
     output = BytesIO()
-    writer.write(output)
+    PdfWriter().write(output, template_pdf)
     output.seek(0)
     return output
 
@@ -76,12 +63,12 @@ if st.button("🚀 Generar PDF"):
             else:
                 row = df.loc[df['PRODUCTO'] == producto].iloc[0]
                 data_dict = {}
-
                 for pdf_field, excel_col in pdf_to_excel_map.items():
                     if excel_col in row:
                         data_dict[pdf_field] = str(row[excel_col])
 
-                output_pdf = fill_pdf(pdf_file, data_dict)
+                # Generar PDF con campos visibles
+                output_pdf = fill_pdf_pdfrw(pdf_file, data_dict)
 
                 st.success(f"✅ PDF generado correctamente para el producto {producto}")
 
