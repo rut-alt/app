@@ -9,19 +9,16 @@ def fill_pdf(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
 
+    # Añadir todas las páginas
     for page in reader.pages:
         writer.add_page(page)
 
-    # Rellenar campos
-    writer.update_page_form_field_values(writer.pages[0], data_dict)
-
-    # ✅ Si el PDF original tiene AcroForm, lo copiamos
+    # ✅ Copiar o crear AcroForm antes de rellenar campos
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
             NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
         })
     else:
-        # 🔹 Si no tiene, lo creamos manualmente
         writer._root_object.update({
             NameObject("/AcroForm"): DictionaryObject({
                 NameObject("/Fields"): ArrayObject(),
@@ -29,7 +26,10 @@ def fill_pdf(input_pdf, data_dict):
             })
         })
 
-    # 🔹 Forzar la visualización de los valores
+    # ✅ Ahora sí, rellenar los campos
+    writer.update_page_form_field_values(writer.pages[0], data_dict)
+
+    # Forzar visualización de valores
     writer._root_object["/AcroForm"].update({
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
