@@ -2,24 +2,37 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, BooleanObject, TextStringObject
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
-# --- FUNCION PARA RELLENAR PDF ---
-def fill_pdf(input_pdf, data_dict):
+# --- FUNCION PARA CREAR CAPA DE TEXTO CON REPORTLAB ---
+def create_overlay(data_dict, page_size):
+    packet = BytesIO()
+    can = canvas.Canvas(packet, pagesize=page_size)
+    # Ajusta la posición según tus campos en el PDF
+    y_start = page_size[1] - 50  # ejemplo, 50 pts desde arriba
+    for i, (field, value) in enumerate(data_dict.items()):
+        can.drawString(50, y_start - i*20, f"{field}: {value}")
+    can.save()
+    packet.seek(0)
+    return packet
+
+# --- FUNCION PRINCIPAL PARA RELLENAR PDF ---
+def fill_pdf_visible(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
 
-    # Copiar todas las páginas del PDF original
+    # Copiar todas las páginas
     for page in reader.pages:
         writer.add_page(page)
 
-    # Copiar AcroForm si existe, si no crear uno
+    # Forzar NeedAppearances
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
-            NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
+            "/AcroForm": reader.trailer["/Root"]["/AcroForm"]
         })
     else:
-        from pypdf.generic import DictionaryObject, ArrayObject
+        from pypdf.generic import DictionaryObject, ArrayObject, BooleanObject, NameObject
         writer._root_object.update({
             NameObject("/AcroForm"): DictionaryObject({
                 NameObject("/Fields"): ArrayObject(),
@@ -27,36 +40,36 @@ def fill_pdf(input_pdf, data_dict):
             })
         })
 
-    # Rellenar los campos con los valores del Excel
-    writer.update_page_form_field_values(writer.pages[0], data_dict)
-
-    # Forzar que se vean los valores en Adobe
     writer._root_object["/AcroForm"].update({
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
 
+    # Generar capa con reportlab
+    first_page = reader.pages[0]
+    page_size = (first_page.mediabox.width, first_page.mediabox.height)
+    overlay_pdf = PdfReader(create_overlay(data_dict, page_size))
+
+    # Fusionar la capa de texto sobre la primera página
+    from pypdf import PageObject
+    overlay_page = overlay_pdf.pages[0]
+    first_page.merge_page(overlay_page)
+
+    # Guardar PDF en memoria
     output = BytesIO()
     writer.write(output)
     output.seek(0)
     return output
 
-
-# --- INTERFAZ STREAMLIT ---
+# --- STREAMLIT ---
 st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
 st.title("🧾 Generador de PDF Climagas")
 
-st.markdown("""
-Sube tu **plantilla PDF** y el **Excel con los datos del producto** para generar automáticamente un PDF con los campos rellenados.
-""")
+st.markdown("Sube tu PDF plantilla y Excel con productos para generar un PDF con los campos visibles automáticamente.")
 
-# Subida de archivos
 pdf_file = st.file_uploader("📄 Sube la plantilla PDF", type="pdf")
 excel_file = st.file_uploader("📊 Sube el Excel con los productos", type=["xls", "xlsx"])
-
-# Entrada del código de producto
 producto = st.number_input("Introduce el código del producto", step=1, min_value=0)
 
-# Mapeo PDF -> Excel
 pdf_to_excel_map = {
     "Potencia Nominal kW": "Potencia Nominal kW",
     "Fecha de solicitud de licencia de obra en su defec": "Fecha de solicitud de licencia de obra en su defect",
@@ -66,14 +79,12 @@ pdf_to_excel_map = {
     "Administrativo": "Administrativo"
 }
 
-# Botón principal
 if st.button("🚀 Generar PDF"):
     if not pdf_file or not excel_file:
-        st.error("Por favor, sube el PDF y el Excel antes de continuar.")
+        st.error("Por favor, sube ambos archivos antes de continuar.")
     else:
         try:
             df = pd.read_excel(excel_file)
-
             if producto not in df['PRODUCTO'].values:
                 st.error("El código del producto no se encuentra en el Excel.")
             else:
@@ -83,17 +94,14 @@ if st.button("🚀 Generar PDF"):
                     if excel_col in row:
                         data_dict[pdf_field] = str(row[excel_col])
 
-                # Generar PDF con campos visibles
-                output_pdf = fill_pdf(pdf_file, data_dict)
+                output_pdf = fill_pdf_visible(pdf_file, data_dict)
 
                 st.success(f"✅ PDF generado correctamente para el producto {producto}")
-
                 st.download_button(
-                    label="⬇️ Descargar PDF con campos rellenados",
+                    label="⬇️ Descargar PDF con campos visibles",
                     data=output_pdf,
                     file_name=f"pdf_producto_{producto}.pdf",
                     mime="application/pdf"
                 )
-
         except Exception as e:
             st.error(f"❌ Error al generar el PDF: {e}")
