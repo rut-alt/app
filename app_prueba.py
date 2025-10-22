@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, TextStringObject, BooleanObject
+from pypdf.generic import NameObject, TextStringObject, BooleanObject, DictionaryObject, ArrayObject
 
-# --- FUNCIÓN PARA RELLENAR PDF Y HACER QUE LOS DATOS SE VEAN ---
+
 def fill_pdf(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
@@ -12,20 +12,27 @@ def fill_pdf(input_pdf, data_dict):
     for page in reader.pages:
         writer.add_page(page)
 
+    # Rellenar campos
     writer.update_page_form_field_values(writer.pages[0], data_dict)
 
-    # 🔹 Fuerza que los valores se vean al abrir el PDF
+    # ✅ Si el PDF original tiene AcroForm, lo copiamos
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
             NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
         })
-        writer._root_object["/AcroForm"].update({
-            NameObject("/NeedAppearances"): BooleanObject(True)
-        })
     else:
+        # 🔹 Si no tiene, lo creamos manualmente
         writer._root_object.update({
-            NameObject("/NeedAppearances"): BooleanObject(True)
+            NameObject("/AcroForm"): DictionaryObject({
+                NameObject("/Fields"): ArrayObject(),
+                NameObject("/NeedAppearances"): BooleanObject(True)
+            })
         })
+
+    # 🔹 Forzar la visualización de los valores
+    writer._root_object["/AcroForm"].update({
+        NameObject("/NeedAppearances"): BooleanObject(True)
+    })
 
     output = BytesIO()
     writer.write(output)
@@ -67,14 +74,13 @@ if st.button("🚀 Generar PDF"):
             if producto not in df['PRODUCTO'].values:
                 st.error("El código del producto no se encuentra en el Excel.")
             else:
-                # --- Crear diccionario de datos a rellenar ---
                 row = df.loc[df['PRODUCTO'] == producto].iloc[0]
                 data_dict = {}
+
                 for pdf_field, excel_col in pdf_to_excel_map.items():
                     if excel_col in row:
                         data_dict[pdf_field] = str(row[excel_col])
 
-                # --- Generar PDF relleno ---
                 output_pdf = fill_pdf(pdf_file, data_dict)
 
                 st.success(f"✅ PDF generado correctamente para el producto {producto}")
@@ -88,5 +94,3 @@ if st.button("🚀 Generar PDF"):
 
         except Exception as e:
             st.error(f"❌ Error al generar el PDF: {e}")
-
-
