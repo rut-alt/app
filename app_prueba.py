@@ -2,56 +2,36 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, TextStringObject, BooleanObject, DictionaryObject
+from pypdf.generic import NameObject, BooleanObject
 
-# --- FUNCIÓN PARA RELLENAR PDF (solo texto) ---
+# --- FUNCIÓN PARA RELLENAR PDF (Texto y apariencia) ---
 def fill_pdf_text_only(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
 
+    # Copiar páginas
     for page in reader.pages:
         writer.add_page(page)
 
-    # Forzar NeedAppearances
+    # Copiar AcroForm si existe
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
             NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
         })
-    else:
-        from pypdf.generic import ArrayObject
-        writer._root_object.update({
-            NameObject("/AcroForm"): DictionaryObject({
-                NameObject("/Fields"): ArrayObject(),
-                NameObject("/NeedAppearances"): BooleanObject(True)
-            })
-        })
+
+    # Forzar NeedAppearances
     writer._root_object["/AcroForm"].update({
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
 
-    # Escribir texto y forzar apariencia
-    for page in writer.pages:
-        annots = page.get("/Annots")
-        if not annots:
-            continue
-        for annot in annots:
-            field = annot.get_object()
-            field_name = field.get("/T")
-            if not field_name or field_name not in data_dict:
-                continue
-            if field.get("/FT") == "/Tx":  # campo de texto
-                value = str(data_dict[field_name])
-                field.update({
-                    NameObject("/V"): TextStringObject(value),
-                    NameObject("/AP"): DictionaryObject()  # fuerza actualización
-                })
+    # Actualizar campos (rellena y fuerza visualización)
+    writer.update_page_form_field_values(writer.pages, data_dict)
 
     # Guardar PDF en memoria
     output = BytesIO()
     writer.write(output)
     output.seek(0)
     return output
-
 
 # --- CONFIGURACIÓN STREAMLIT ---
 st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
@@ -66,64 +46,64 @@ empresa = st.selectbox(
 # --- DATOS DE LAS EMPRESAS ---
 empresas_datos = {
     "Climagas Madrid S.L.": {
-        "textfield-107": "B87512345",
-        "textfield-108": "González",
-        "textfield-109": "Ruiz",
-        "textfield-110": "Climagas Madrid S.L.",
-        "textfield-111": "info@climagas.es",
-        "textfield-112": "Calle",
-        "textfield-113": "Mayor",
-        "textfield-114": "25",
-        "textfield-115": "2",
-        "textfield-116": "A",
-        "textfield-117": "",
-        "textfield-118": "1",
-        "textfield-119": "Dcha",
-        "textfield-120": "Madrid",
-        "textfield-121": "Madrid",
-        "textfield-122": "28001",
-        "textfield-123": "913000000",
-        "textfield-124": "600000000",
+        "Textfield-107": "B87512345",  # NIF
+        "Textfield-108": "González",   # Primer Apellido
+        "Textfield-109": "Ruiz",       # Segundo Apellido
+        "Textfield-110": "Climagas Madrid S.L.",  # Nombre/Razón Social
+        "Textfield-111": "info@climagas.es",     # Correo electrónico
+        "Textfield-112": "Calle",    # Tipo de vía
+        "Textfield-113": "Mayor",    # Nombre vía
+        "Textfield-114": "25",       # Nº
+        "Textfield-115": "2",        # Bloque
+        "Textfield-116": "A",        # Portal
+        "Textfield-117": "",         # Escalera
+        "Textfield-118": "1",        # Piso
+        "Textfield-119": "Dcha",     # Puerta
+        "Textfield-120": "Madrid",   # Localidad
+        "Textfield-121": "Madrid",   # Provincia
+        "Textfield-122": "28001",    # CP
+        "Textfield-123": "913000000",# Teléfono Fijo
+        "Textfield-124": "600000000" # Teléfono Móvil
     },
     "Instalaciones EcoTerm S.A.": {
-        "textfield-107": "A45896321",
-        "textfield-108": "López",
-        "textfield-109": "Martínez",
-        "textfield-110": "Instalaciones EcoTerm S.A.",
-        "textfield-111": "contacto@ecoterm.com",
-        "textfield-112": "Avenida",
-        "textfield-113": "Andalucía",
-        "textfield-114": "12",
-        "textfield-115": "",
-        "textfield-116": "B",
-        "textfield-117": "2",
-        "textfield-118": "",
-        "textfield-119": "",
-        "textfield-120": "Sevilla",
-        "textfield-121": "Sevilla",
-        "textfield-122": "41003",
-        "textfield-123": "955123456",
-        "textfield-124": "690123456",
+        "Textfield-107": "A45896321",
+        "Textfield-108": "López",
+        "Textfield-109": "Martínez",
+        "Textfield-110": "Instalaciones EcoTerm S.A.",
+        "Textfield-111": "contacto@ecoterm.com",
+        "Textfield-112": "Avenida",
+        "Textfield-113": "Andalucía",
+        "Textfield-114": "12",
+        "Textfield-115": "",
+        "Textfield-116": "B",
+        "Textfield-117": "2",
+        "Textfield-118": "",
+        "Textfield-119": "",
+        "Textfield-120": "Sevilla",
+        "Textfield-121": "Sevilla",
+        "Textfield-122": "41003",
+        "Textfield-123": "955123456",
+        "Textfield-124": "690123456",
     },
     "CalorPlus Energía S.L.": {
-        "textfield-107": "B54321987",
-        "textfield-108": "Santos",
-        "textfield-109": "Pérez",
-        "textfield-110": "CalorPlus Energía S.L.",
-        "textfield-111": "info@calorplus.com",
-        "textfield-112": "Camino",
-        "textfield-113": "Verde",
-        "textfield-114": "8",
-        "textfield-115": "",
-        "textfield-116": "",
-        "textfield-117": "",
-        "textfield-118": "",
-        "textfield-119": "",
-        "textfield-120": "Valencia",
-        "textfield-121": "Valencia",
-        "textfield-122": "46020",
-        "textfield-123": "961234567",
-        "textfield-124": "670234567",
+        "Textfield-107": "B54321987",
+        "Textfield-108": "Santos",
+        "Textfield-109": "Pérez",
+        "Textfield-110": "CalorPlus Energía S.L.",
+        "Textfield-111": "info@calorplus.com",
+        "Textfield-112": "Camino",
+        "Textfield-113": "Verde",
+        "Textfield-114": "8",
+        "Textfield-115": "",
+        "Textfield-116": "",
+        "Textfield-117": "",
+        "Textfield-118": "",
+        "Textfield-119": "",
+        "Textfield-120": "Valencia",
+        "Textfield-121": "Valencia",
+        "Textfield-122": "46020",
+        "Textfield-123": "961234567",
+        "Textfield-124": "670234567",
     }
 }
 
@@ -157,7 +137,7 @@ if st.button("🚀 Generar PDF"):
                     if excel_col in row
                 }
 
-                # Agregar los datos de la empresa seleccionada
+                # Agregar datos de la empresa seleccionada
                 data_dict.update(empresas_datos[empresa])
 
                 output_pdf = fill_pdf_text_only(pdf_file, data_dict)
