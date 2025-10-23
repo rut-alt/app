@@ -2,36 +2,34 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, TextStringObject, BooleanObject
+from pypdf.generic import NameObject, TextStringObject, BooleanObject, DictionaryObject
 
 # --- FUNCIÓN PARA RELLENAR PDF (solo texto) ---
 def fill_pdf_text_only(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
 
-    # Copiar todas las páginas
     for page in reader.pages:
         writer.add_page(page)
 
-    # Forzar NeedAppearances en AcroForm
+    # Forzar NeedAppearances
     if "/AcroForm" in reader.trailer["/Root"]:
         writer._root_object.update({
             NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]
         })
     else:
-        from pypdf.generic import DictionaryObject, ArrayObject
+        from pypdf.generic import ArrayObject
         writer._root_object.update({
             NameObject("/AcroForm"): DictionaryObject({
                 NameObject("/Fields"): ArrayObject(),
                 NameObject("/NeedAppearances"): BooleanObject(True)
             })
         })
-
     writer._root_object["/AcroForm"].update({
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
 
-    # Rellenar los campos del PDF
+    # Escribir texto y forzar apariencia
     for page in writer.pages:
         annots = page.get("/Annots")
         if not annots:
@@ -41,9 +39,12 @@ def fill_pdf_text_only(input_pdf, data_dict):
             field_name = field.get("/T")
             if not field_name or field_name not in data_dict:
                 continue
-
-            if field.get("/FT") == "/Tx":  # Solo texto
-                field.update({NameObject("/V"): TextStringObject(str(data_dict[field_name]))})
+            if field.get("/FT") == "/Tx":  # campo de texto
+                value = str(data_dict[field_name])
+                field.update({
+                    NameObject("/V"): TextStringObject(value),
+                    NameObject("/AP"): DictionaryObject()  # fuerza actualización
+                })
 
     # Guardar PDF en memoria
     output = BytesIO()
@@ -51,21 +52,21 @@ def fill_pdf_text_only(input_pdf, data_dict):
     output.seek(0)
     return output
 
-# --- CONFIGURACIÓN DE LA APP ---
+
+# --- CONFIGURACIÓN STREAMLIT ---
 st.set_page_config(page_title="Generador PDF Climagas", page_icon="🧾", layout="centered")
 st.title("🧾 Generador de PDF Climagas")
 
 # --- SELECCIÓN DE EMPRESA ---
-st.subheader("Selecciona la empresa")
 empresa = st.selectbox(
-    "Nombre de la empresa",
+    "Selecciona la empresa",
     ["Climagas Madrid S.L.", "Instalaciones EcoTerm S.A.", "CalorPlus Energía S.L."]
 )
 
-# --- DATOS POR EMPRESA ---
+# --- DATOS DE LAS EMPRESAS ---
 empresas_datos = {
     "Climagas Madrid S.L.": {
-        "textfield-107": "B87512345",  # NIF
+        "textfield-107": "B87512345",
         "textfield-108": "González",
         "textfield-109": "Ruiz",
         "textfield-110": "Climagas Madrid S.L.",
@@ -131,7 +132,6 @@ pdf_file = st.file_uploader("📄 Sube la plantilla PDF", type="pdf")
 excel_file = st.file_uploader("📊 Sube el Excel con los productos", type=["xls", "xlsx"])
 producto = st.number_input("Introduce el código del producto", step=1, min_value=0)
 
-# --- MAPEOS DE CAMPOS PDF → EXCEL ---
 pdf_to_excel_map = {
     "Potencia Nominal kW": "Potencia Nominal kW",
     "Fecha de solicitud de licencia de obra en su defec": "Fecha de solicitud de licencia de obra en su defect",
@@ -151,16 +151,20 @@ if st.button("🚀 Generar PDF"):
                 st.error("El código del producto no se encuentra en el Excel.")
             else:
                 row = df.loc[df['PRODUCTO'] == producto].iloc[0]
-                data_dict = {pdf_field: str(row[excel_col]) for pdf_field, excel_col in pdf_to_excel_map.items() if excel_col in row}
+                data_dict = {
+                    pdf_field: str(row[excel_col])
+                    for pdf_field, excel_col in pdf_to_excel_map.items()
+                    if excel_col in row
+                }
 
-                # Añadir los datos de la empresa seleccionada
+                # Agregar los datos de la empresa seleccionada
                 data_dict.update(empresas_datos[empresa])
 
                 output_pdf = fill_pdf_text_only(pdf_file, data_dict)
 
                 st.success(f"✅ PDF generado correctamente para el producto {producto} de {empresa}")
                 st.download_button(
-                    label="⬇️ Descargar PDF con campos de texto rellenados",
+                    label="⬇️ Descargar PDF con campos rellenados",
                     data=output_pdf,
                     file_name=f"{empresa.replace(' ', '_')}_producto_{producto}.pdf",
                     mime="application/pdf"
