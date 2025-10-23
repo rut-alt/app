@@ -4,6 +4,7 @@ from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject, BooleanObject, ArrayObject, DictionaryObject
 
+# --- FUNCIÓN PARA RELLENAR PDF ---
 def fill_pdf_text_only(input_pdf, data_dict):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
@@ -29,7 +30,7 @@ def fill_pdf_text_only(input_pdf, data_dict):
         NameObject("/NeedAppearances"): BooleanObject(True)
     })
 
-    # Rellenar campos de texto manualmente (empresa + Excel)
+    # Rellenar campos de texto manualmente
     for page in writer.pages:
         annots = page.get("/Annots")
         if not annots:
@@ -39,7 +40,7 @@ def fill_pdf_text_only(input_pdf, data_dict):
             field_name = field.get("/T")
             if not field_name or field_name not in data_dict:
                 continue
-            if field.get("/FT") == "/Tx":  # solo campos de texto
+            if field.get("/FT") == "/Tx":
                 field.update({NameObject("/V"): TextStringObject(str(data_dict[field_name]))})
 
     # Guardar en memoria
@@ -89,41 +90,58 @@ empresas_datos = {
 # Subida de archivos
 pdf_file = st.file_uploader("📄 Sube la plantilla PDF", type="pdf")
 excel_file = st.file_uploader("📊 Sube el Excel con los productos", type=["xls", "xlsx"])
-producto = st.number_input("Introduce el código del producto", step=1, min_value=0)
 
-pdf_to_excel_map = {
-    "Potencia Nominal kW": "Potencia Nominal kW",
-    "Fecha de solicitud de licencia de obra en su defec": "Fecha de solicitud de licencia de obra en su defect",
-    "Potencia total inicial": "Potencia total inicial",
-    "Potencia a modificar": "Potencia a modificar",
-    "Potencia total final": "Potencia total final"
-}
+# Número de productos a meter
+num_productos = st.number_input("¿Cuántos productos vas a meter?", step=1, min_value=1)
 
-# Generar PDF
+productos_seleccionados = []
+if excel_file:
+    df = pd.read_excel(excel_file)
+    for i in range(num_productos):
+        producto = st.selectbox(f"Selecciona el producto {i+1}", df['PRODUCTO'].values, key=i)
+        productos_seleccionados.append(producto)
+
+# Botón generar PDF
 if st.button("🚀 Generar PDF"):
     if not pdf_file or not excel_file:
-        st.error("Por favor, sube ambos archivos antes de continuar.")
+        st.error("Sube ambos archivos antes de continuar.")
+    elif len(productos_seleccionados) == 0:
+        st.error("Selecciona al menos un producto.")
     else:
         try:
-            df = pd.read_excel(excel_file)
-            if producto not in df['PRODUCTO'].values:
-                st.error("El código del producto no se encuentra en el Excel.")
-            else:
-                row = df.loc[df['PRODUCTO'] == producto].iloc[0]
-                data_dict = {pdf_field: str(row[excel_col]) for pdf_field, excel_col in pdf_to_excel_map.items() if excel_col in row}
+            potencias = []
+            for prod in productos_seleccionados:
+                row = df.loc[df['PRODUCTO'] == prod].iloc[0]
+                potencias.append(row['Potencia Nominal kW'])
+            
+            # Datos de productos
+            data_dict = {}
+            data_dict["Potencia Nominal kW"] = max(potencias)
+            data_dict["Potencia total inicial"] = sum(potencias)
 
-                # Combinar con datos de empresa
-                data_dict.update(empresas_datos[empresa])
+            # Para otros campos de producto puedes usar el primero si quieres
+            first_row = df.loc[df['PRODUCTO'] == productos_seleccionados[0]].iloc[0]
+            pdf_to_excel_map = {
+                "Potencia a modificar": "Potencia a modificar",
+                "Potencia total final": "Potencia total final",
+                "Fecha de solicitud de licencia de obra en su defec": "Fecha de solicitud de licencia de obra en su defect"
+            }
+            for pdf_field, excel_col in pdf_to_excel_map.items():
+                if excel_col in first_row:
+                    data_dict[pdf_field] = first_row[excel_col]
 
-                output_pdf = fill_pdf_text_only(pdf_file, data_dict)
+            # Agregar datos de empresa
+            data_dict.update(empresas_datos[empresa])
 
-                st.success(f"✅ PDF generado correctamente para el producto {producto} de {empresa}")
-                st.download_button(
-                    label="⬇️ Descargar PDF",
-                    data=output_pdf,
-                    file_name=f"{empresa.replace(' ', '_')}_producto_{producto}.pdf",
-                    mime="application/pdf"
-                )
+            # Rellenar PDF
+            output_pdf = fill_pdf_text_only(pdf_file, data_dict)
+
+            st.success(f"✅ PDF generado correctamente para {empresa} con {num_productos} productos")
+            st.download_button(
+                label="⬇️ Descargar PDF",
+                data=output_pdf,
+                file_name=f"{empresa.replace(' ', '_')}_productos.pdf",
+                mime="application/pdf"
+            )
         except Exception as e:
             st.error(f"❌ Error al generar el PDF: {e}")
-
